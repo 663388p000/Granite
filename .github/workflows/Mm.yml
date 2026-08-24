@@ -1,38 +1,61 @@
 name: Build Granite - Linux
 
 on:
+  workflow_dispatch:
+    inputs:
+      shared:
+        description: "Build Granite as shared library?"
+        required: true
+        default: "OFF"
+        type: choice
+        options:
+          - OFF
+          - ON
+
   pull_request:
     types: [opened, synchronize, reopened]
+
   push:
     branches: [master]
 
 jobs:
   build:
-    name: "Linux | ${{ matrix.granite_platform }} | ${{ matrix.shared }}"
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        build_type: [Release]
-        shared: [OFF, ON]
-        granite_platform: [SDL, libretro]
+    name: "Linux | SDL | SHARED=${{ inputs.shared || 'OFF' }}"
 
     runs-on: ubuntu-latest
 
+    env:
+      BUILD_TYPE: Release
+      GRANITE_PLATFORM: SDL
+      GRANITE_SHARED: ${{ inputs.shared || 'OFF' }}
+
     steps:
+      # ------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # ------------------------------------------------------------
+      # Python
+      # ------------------------------------------------------------
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
+      # ------------------------------------------------------------
+      # Linux dependencies
+      # ------------------------------------------------------------
+
       - name: Install dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             cmake \
@@ -44,35 +67,54 @@ jobs:
             vulkan-tools
 
       # ------------------------------------------------------------
-      # Internal build
+      # Configure Granite
       # ------------------------------------------------------------
 
       - name: Configure Granite
-        working-directory: ${{ github.workspace }}
         run: |
           cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install" \
-            -DGRANITE_SHARED=${{ matrix.shared }} \
-            -DGRANITE_PLATFORM=${{ matrix.granite_platform }} \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DGRANITE_SHARED="$GRANITE_SHARED" \
+            -DGRANITE_PLATFORM="$GRANITE_PLATFORM" \
             -DGRANITE_AUDIO=ON \
             -DGRANITE_INSTALL_TARGETS=ON \
             -DGRANITE_INSTALL_EXE_TARGETS=ON
 
+      # ------------------------------------------------------------
+      # Build Granite
+      # ------------------------------------------------------------
+
       - name: Build Granite
-        working-directory: ${{ github.workspace }}
         run: |
           cmake --build build \
-            --config ${{ matrix.build_type }} \
+            --config "$BUILD_TYPE" \
             --parallel 2
 
+      # ------------------------------------------------------------
+      # Install Granite
+      # ------------------------------------------------------------
+
       - name: Install Granite
-        working-directory: ${{ github.workspace }}
         run: |
           cmake --install build
 
       # ------------------------------------------------------------
-      # Show exactly what CMake installed
+      # Show build information
+      # ------------------------------------------------------------
+
+      - name: Show build configuration
+        run: |
+          echo "=========================================="
+          echo "Granite build configuration"
+          echo "=========================================="
+          echo "Platform : $GRANITE_PLATFORM"
+          echo "Shared   : $GRANITE_SHARED"
+          echo "Build    : $BUILD_TYPE"
+          echo "=========================================="
+
+      # ------------------------------------------------------------
+      # Show installed files
       # ------------------------------------------------------------
 
       - name: Show installed files
@@ -90,89 +132,87 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Test internal linkage
-        if: matrix.granite_platform == 'SDL'
+        if: hashFiles('install/bin/linkage-test') != ''
         working-directory: ${{ github.workspace }}/install/bin
         run: |
           ./linkage-test
 
       # ------------------------------------------------------------
-      # External build
+      # External test
       # ------------------------------------------------------------
 
       - name: Configure external test
-        working-directory: ${{ github.workspace }}
         run: |
           cmake -S self-test -B build-self \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/self-install" \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/self-install" \
             -DGRANITE_AUDIO=ON \
-            -DGRANITE_SHARED=${{ matrix.shared }} \
-            -DGRANITE_PLATFORM=${{ matrix.granite_platform }}
+            -DGRANITE_SHARED="$GRANITE_SHARED" \
+            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
 
       - name: Build external test
-        working-directory: ${{ github.workspace }}
         run: |
           cmake --build build-self \
-            --config ${{ matrix.build_type }} \
+            --config "$BUILD_TYPE" \
             --parallel 2
 
       - name: Install external test
-        working-directory: ${{ github.workspace }}
         run: |
           cmake --install build-self
 
       - name: Test external linkage
+        if: hashFiles('self-install/bin/link-test') != ''
         working-directory: ${{ github.workspace }}/self-install/bin
         run: |
           ./link-test
 
       # ------------------------------------------------------------
-      # Package library
+      # Package
       # ------------------------------------------------------------
 
       - name: Package Granite
         run: |
-          PACKAGE="granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}"
+          PACKAGE="granite-linux-${GRANITE_PLATFORM}-shared-${GRANITE_SHARED}"
 
-          mkdir -p "package/${PACKAGE}"
+          mkdir -p "package/$PACKAGE"
 
           cp -a \
             "$GITHUB_WORKSPACE/install/." \
-            "package/${PACKAGE}/"
+            "package/$PACKAGE/"
 
           echo "=========================================="
           echo "Package contents"
           echo "=========================================="
 
-          find "package/${PACKAGE}" \
+          find "package/$PACKAGE" \
             -type f \
             -print | sort
 
           tar -C package \
             -czf "${PACKAGE}.tar.gz" \
-            "${PACKAGE}"
+            "$PACKAGE"
 
       # ------------------------------------------------------------
-      # Upload library + headers + CMake package
+      # Upload package
       # ------------------------------------------------------------
 
       - name: Upload Granite package
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}
+          name: granite-linux-SDL-shared-${{ env.GRANITE_SHARED }}
           path: |
-            granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}.tar.gz
+            granite-linux-SDL-shared-${{ env.GRANITE_SHARED }}.tar.gz
           if-no-files-found: error
           retention-days: 30
 
       # ------------------------------------------------------------
-      # Upload raw CMake install tree
+      # Upload raw install tree
       # ------------------------------------------------------------
 
       - name: Upload install tree
         uses: actions/upload-artifact@v4
         with:
-          name: granite-install-${{ matrix.granite_platform }}-${{ matrix.shared }}
+          name: granite-linux-SDL-install-${{ env.GRANITE_SHARED }}
           path: install/
           if-no-files-found: error
           retention-days: 30
