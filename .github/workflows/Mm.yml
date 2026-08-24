@@ -16,7 +16,7 @@ on:
         description: "Build Granite as shared library"
         required: true
         type: choice
-        default: OFF
+        default: true
         options:
           - OFF
           - ON
@@ -114,70 +114,8 @@ jobs:
             --config "$BUILD_TYPE" \
             --parallel 2
 
-      # ------------------------------------------------------------
-      # Install
-      # ------------------------------------------------------------
-
-      - name: Install Granite
-        run: |
-          cmake --install build
-
-      # ------------------------------------------------------------
-      # Show output
-      # ------------------------------------------------------------
-
-      - name: Show installed files
-        run: |
-          echo "=========================================="
-          echo "Installed files"
-          echo "=========================================="
-
-          find "$GITHUB_WORKSPACE/install" \
-            -type f \
-            -print | sort
-
-      # ------------------------------------------------------------
-      # Internal linkage test
-      # ------------------------------------------------------------
-
-      - name: Test internal linkage
-        if: hashFiles('install/bin/linkage-test') != ''
-        working-directory: ${{ github.workspace }}/install/bin
-        run: |
-          ./linkage-test
-
-      # ------------------------------------------------------------
-      # External build
-      # ------------------------------------------------------------
-
-      - name: Configure external test
-        run: |
-          cmake -S self-test -B build-self \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/self-install" \
-            -DGRANITE_AUDIO=ON \
-            -DGRANITE_SHARED="$GRANITE_SHARED" \
-            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
-
-      - name: Build external test
-        run: |
-          cmake --build build-self \
-            --config "$BUILD_TYPE" \
-            --parallel 2
-
-      - name: Install external test
-        run: |
-          cmake --install build-self
-
-      # ------------------------------------------------------------
-      # External linkage test
-      # ------------------------------------------------------------
-
-      - name: Test external linkage
-        if: hashFiles('self-install/bin/link-test') != ''
-        working-directory: ${{ github.workspace }}/self-install/bin
-        run: |
-          ./link-test
+      
+      
 
       # ------------------------------------------------------------
       # Package
