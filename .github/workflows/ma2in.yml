@@ -1,0 +1,218 @@
+name: Build Granite - Linux
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    name: "Linux | ${{ matrix.granite_platform }} | SHARED=${{ matrix.shared }}"
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release]
+        shared: [OFF, ON]
+        granite_platform: ["SDL", "libretro"]
+
+    runs-on: ubuntu-latest
+
+    env:
+      BUILD_TYPE: ${{ matrix.build_type }}
+      GRANITE_SHARED: ${{ matrix.shared }}
+      GRANITE_PLATFORM: ${{ matrix.granite_platform }}
+
+    steps:
+      # ------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ------------------------------------------------------------
+      # Python
+      # ------------------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # ------------------------------------------------------------
+      # Linux dependencies
+      # ------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            xorg-dev \
+            libpulse-dev
+
+      # ------------------------------------------------------------
+      # Create build directories
+      # ------------------------------------------------------------
+      - name: Create build environment
+        run: |
+          cmake -E make_directory "$GITHUB_WORKSPACE/build"
+          cmake -E make_directory "$GITHUB_WORKSPACE/build-self"
+          cmake -E make_directory "$GITHUB_WORKSPACE/viewer/assets"
+
+      # ============================================================
+      # INTERNAL BUILD
+      # ============================================================
+
+      - name: Configure internal
+        working-directory: ${{ github.workspace }}/build
+        run: |
+          cmake "$GITHUB_WORKSPACE" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/output" \
+            -DGRANITE_INSTALL_EXE_TARGETS=ON \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DGRANITE_AUDIO=ON \
+            -DGRANITE_SHARED="$GRANITE_SHARED" \
+            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
+
+      - name: Build internal
+        working-directory: ${{ github.workspace }}/build
+        run: |
+          cmake --build . \
+            --config "$BUILD_TYPE" \
+            --target install \
+            --parallel 2
+
+      # ------------------------------------------------------------
+      # Internal tests
+      # ------------------------------------------------------------
+      - name: Test internal linkage
+        working-directory: ${{ github.workspace }}/build/output/bin
+        run: |
+          ./linkage-test
+
+      # ============================================================
+      # EXTERNAL BUILD
+      # ============================================================
+
+      - name: Configure external
+        working-directory: ${{ github.workspace }}/build-self
+        run: |
+          cmake "$GITHUB_WORKSPACE/self-test" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build-self/output" \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DGRANITE_AUDIO=ON \
+            -DGRANITE_SHARED="$GRANITE_SHARED" \
+            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
+
+      - name: Build external
+        working-directory: ${{ github.workspace }}/build-self
+        run: |
+          cmake --build . \
+            --config "$BUILD_TYPE" \
+            --target install \
+            --parallel 2
+
+      # ------------------------------------------------------------
+      # External tests
+      # ------------------------------------------------------------
+      - name: Test external linkage
+        working-directory: ${{ github.workspace }}/build-self/output/bin
+        run: |
+          ./link-test
+
+      # ============================================================
+      # SHOW OUTPUT
+      # ============================================================
+
+      - name: Show installed files
+        run: |
+          echo "========================================"
+          echo "Granite installation:"
+          echo "========================================"
+
+          find "$GITHUB_WORKSPACE/build/output" \
+            -type f \
+            -print | sort
+
+      # ============================================================
+      # PACKAGE LIBRARY
+      # ============================================================
+
+      - name: Package Granite library
+        run: |
+          PACKAGE_NAME="granite-linux-${GRANITE_PLATFORM}-shared-${GRANITE_SHARED}"
+
+          mkdir -p "$GITHUB_WORKSPACE/package/include"
+          mkdir -p "$GITHUB_WORKSPACE/package/lib"
+          mkdir -p "$GITHUB_WORKSPACE/package/bin"
+
+          # Headers
+          if [ -d "$GITHUB_WORKSPACE/build/output/include" ]; then
+            cp -a \
+              "$GITHUB_WORKSPACE/build/output/include/." \
+              "$GITHUB_WORKSPACE/package/include/"
+          fi
+
+          # Libraries
+          if [ -d "$GITHUB_WORKSPACE/build/output/lib" ]; then
+            cp -a \
+              "$GITHUB_WORKSPACE/build/output/lib/." \
+              "$GITHUB_WORKSPACE/package/lib/"
+          fi
+
+          # Executables
+          if [ -d "$GITHUB_WORKSPACE/build/output/bin" ]; then
+            cp -a \
+              "$GITHUB_WORKSPACE/build/output/bin/." \
+              "$GITHUB_WORKSPACE/package/bin/"
+          fi
+
+          echo "========================================"
+          echo "Packaged files:"
+          echo "========================================"
+
+          find "$GITHUB_WORKSPACE/package" \
+            -type f \
+            -print | sort
+
+          cd "$GITHUB_WORKSPACE"
+
+          tar -czf "${PACKAGE_NAME}.tar.gz" package
+
+          echo "========================================"
+          echo "Created:"
+          echo "${PACKAGE_NAME}.tar.gz"
+          echo "========================================"
+
+      # ============================================================
+      # UPLOAD LIBRARY ARTIFACT
+      # ============================================================
+
+      - name: Upload Granite library
+        uses: actions/upload-artifact@v4
+        with:
+          name: granite-linux-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}
+          path: |
+            granite-linux-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      # ------------------------------------------------------------
+      # Upload raw install directory too
+      # ------------------------------------------------------------
+      - name: Upload install tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: granite-install-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}
+          path: |
+            build/output/include/**
+            build/output/lib/**
+            build/output/bin/**
+          if-no-files-found: warn
+          retention-days: 30
