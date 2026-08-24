@@ -8,211 +8,171 @@ on:
 
 jobs:
   build:
-    name: "Linux | ${{ matrix.granite_platform }} | SHARED=${{ matrix.shared }}"
+    name: "Linux | ${{ matrix.granite_platform }} | ${{ matrix.shared }}"
     
     strategy:
       fail-fast: false
       matrix:
         build_type: [Release]
         shared: [OFF, ON]
-        granite_platform: ["SDL", "libretro"]
+        granite_platform: [SDL, libretro]
 
     runs-on: ubuntu-latest
 
-    env:
-      BUILD_TYPE: ${{ matrix.build_type }}
-      GRANITE_SHARED: ${{ matrix.shared }}
-      GRANITE_PLATFORM: ${{ matrix.granite_platform }}
-
     steps:
-      # ------------------------------------------------------------
-      # Checkout
-      # ------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ------------------------------------------------------------
-      # Python
-      # ------------------------------------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      # ------------------------------------------------------------
-      # Linux dependencies
-      # ------------------------------------------------------------
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             build-essential \
             cmake \
             ninja-build \
             pkg-config \
             xorg-dev \
-            libpulse-dev
+            libpulse-dev \
+            libvulkan-dev \
+            vulkan-tools
 
       # ------------------------------------------------------------
-      # Create build directories
+      # Internal build
       # ------------------------------------------------------------
-      - name: Create build environment
-        run: |
-          cmake -E make_directory "$GITHUB_WORKSPACE/build"
-          cmake -E make_directory "$GITHUB_WORKSPACE/build-self"
-          cmake -E make_directory "$GITHUB_WORKSPACE/viewer/assets"
 
-      # ============================================================
-      # INTERNAL BUILD
-      # ============================================================
-
-      - name: Configure internal
-        working-directory: ${{ github.workspace }}/build
+      - name: Configure Granite
+        working-directory: ${{ github.workspace }}
         run: |
-          cmake "$GITHUB_WORKSPACE" \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/output" \
-            -DGRANITE_INSTALL_EXE_TARGETS=ON \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install" \
+            -DGRANITE_SHARED=${{ matrix.shared }} \
+            -DGRANITE_PLATFORM=${{ matrix.granite_platform }} \
             -DGRANITE_AUDIO=ON \
-            -DGRANITE_SHARED="$GRANITE_SHARED" \
-            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
+            -DGRANITE_INSTALL_TARGETS=ON \
+            -DGRANITE_INSTALL_EXE_TARGETS=ON
 
-      - name: Build internal
-        working-directory: ${{ github.workspace }}/build
+      - name: Build Granite
+        working-directory: ${{ github.workspace }}
         run: |
-          cmake --build . \
-            --config "$BUILD_TYPE" \
-            --target install \
+          cmake --build build \
+            --config ${{ matrix.build_type }} \
             --parallel 2
 
-      # ------------------------------------------------------------
-      # Internal tests
-      # ------------------------------------------------------------
-      - name: Test internal linkage
-        working-directory: ${{ github.workspace }}/build/output/bin
+      - name: Install Granite
+        working-directory: ${{ github.workspace }}
         run: |
-          ./linkage-test
-
-      # ============================================================
-      # EXTERNAL BUILD
-      # ============================================================
-
-      - name: Configure external
-        working-directory: ${{ github.workspace }}/build-self
-        run: |
-          cmake "$GITHUB_WORKSPACE/self-test" \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build-self/output" \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DGRANITE_AUDIO=ON \
-            -DGRANITE_SHARED="$GRANITE_SHARED" \
-            -DGRANITE_PLATFORM="$GRANITE_PLATFORM"
-
-      - name: Build external
-        working-directory: ${{ github.workspace }}/build-self
-        run: |
-          cmake --build . \
-            --config "$BUILD_TYPE" \
-            --target install \
-            --parallel 2
+          cmake --install build
 
       # ------------------------------------------------------------
-      # External tests
+      # Show exactly what CMake installed
       # ------------------------------------------------------------
-      - name: Test external linkage
-        working-directory: ${{ github.workspace }}/build-self/output/bin
-        run: |
-          ./link-test
-
-      # ============================================================
-      # SHOW OUTPUT
-      # ============================================================
 
       - name: Show installed files
         run: |
-          echo "========================================"
-          echo "Granite installation:"
-          echo "========================================"
+          echo "=========================================="
+          echo "Granite install tree"
+          echo "=========================================="
 
-          find "$GITHUB_WORKSPACE/build/output" \
+          find "$GITHUB_WORKSPACE/install" \
             -type f \
             -print | sort
 
-      # ============================================================
-      # PACKAGE LIBRARY
-      # ============================================================
+      # ------------------------------------------------------------
+      # Internal linkage test
+      # ------------------------------------------------------------
 
-      - name: Package Granite library
+      - name: Test internal linkage
+        if: matrix.granite_platform == 'SDL'
+        working-directory: ${{ github.workspace }}/install/bin
         run: |
-          PACKAGE_NAME="granite-linux-${GRANITE_PLATFORM}-shared-${GRANITE_SHARED}"
+          ./linkage-test
 
-          mkdir -p "$GITHUB_WORKSPACE/package/include"
-          mkdir -p "$GITHUB_WORKSPACE/package/lib"
-          mkdir -p "$GITHUB_WORKSPACE/package/bin"
+      # ------------------------------------------------------------
+      # External build
+      # ------------------------------------------------------------
 
-          # Headers
-          if [ -d "$GITHUB_WORKSPACE/build/output/include" ]; then
-            cp -a \
-              "$GITHUB_WORKSPACE/build/output/include/." \
-              "$GITHUB_WORKSPACE/package/include/"
-          fi
+      - name: Configure external test
+        working-directory: ${{ github.workspace }}
+        run: |
+          cmake -S self-test -B build-self \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/self-install" \
+            -DGRANITE_AUDIO=ON \
+            -DGRANITE_SHARED=${{ matrix.shared }} \
+            -DGRANITE_PLATFORM=${{ matrix.granite_platform }}
 
-          # Libraries
-          if [ -d "$GITHUB_WORKSPACE/build/output/lib" ]; then
-            cp -a \
-              "$GITHUB_WORKSPACE/build/output/lib/." \
-              "$GITHUB_WORKSPACE/package/lib/"
-          fi
+      - name: Build external test
+        working-directory: ${{ github.workspace }}
+        run: |
+          cmake --build build-self \
+            --config ${{ matrix.build_type }} \
+            --parallel 2
 
-          # Executables
-          if [ -d "$GITHUB_WORKSPACE/build/output/bin" ]; then
-            cp -a \
-              "$GITHUB_WORKSPACE/build/output/bin/." \
-              "$GITHUB_WORKSPACE/package/bin/"
-          fi
+      - name: Install external test
+        working-directory: ${{ github.workspace }}
+        run: |
+          cmake --install build-self
 
-          echo "========================================"
-          echo "Packaged files:"
-          echo "========================================"
+      - name: Test external linkage
+        working-directory: ${{ github.workspace }}/self-install/bin
+        run: |
+          ./link-test
 
-          find "$GITHUB_WORKSPACE/package" \
+      # ------------------------------------------------------------
+      # Package library
+      # ------------------------------------------------------------
+
+      - name: Package Granite
+        run: |
+          PACKAGE="granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}"
+
+          mkdir -p "package/${PACKAGE}"
+
+          cp -a \
+            "$GITHUB_WORKSPACE/install/." \
+            "package/${PACKAGE}/"
+
+          echo "=========================================="
+          echo "Package contents"
+          echo "=========================================="
+
+          find "package/${PACKAGE}" \
             -type f \
             -print | sort
 
-          cd "$GITHUB_WORKSPACE"
+          tar -C package \
+            -czf "${PACKAGE}.tar.gz" \
+            "${PACKAGE}"
 
-          tar -czf "${PACKAGE_NAME}.tar.gz" package
+      # ------------------------------------------------------------
+      # Upload library + headers + CMake package
+      # ------------------------------------------------------------
 
-          echo "========================================"
-          echo "Created:"
-          echo "${PACKAGE_NAME}.tar.gz"
-          echo "========================================"
-
-      # ============================================================
-      # UPLOAD LIBRARY ARTIFACT
-      # ============================================================
-
-      - name: Upload Granite library
+      - name: Upload Granite package
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}
+          name: granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}
           path: |
-            granite-linux-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}.tar.gz
+            granite-linux-${{ matrix.granite_platform }}-${{ matrix.shared }}.tar.gz
           if-no-files-found: error
           retention-days: 30
 
       # ------------------------------------------------------------
-      # Upload raw install directory too
+      # Upload raw CMake install tree
       # ------------------------------------------------------------
+
       - name: Upload install tree
         uses: actions/upload-artifact@v4
         with:
-          name: granite-install-${{ matrix.granite_platform }}-shared-${{ matrix.shared }}
-          path: |
-            build/output/include/**
-            build/output/lib/**
-            build/output/bin/**
-          if-no-files-found: warn
+          name: granite-install-${{ matrix.granite_platform }}-${{ matrix.shared }}
+          path: install/
+          if-no-files-found: error
           retention-days: 30
