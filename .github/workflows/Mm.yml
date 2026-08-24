@@ -3,11 +3,20 @@ name: Build Granite - Linux
 on:
   workflow_dispatch:
     inputs:
-      shared:
-        description: "Build Granite as shared library?"
+      platform:
+        description: "Granite platform"
         required: true
-        default: "OFF"
         type: choice
+        default: SDL
+        options:
+          - SDL
+          - libretro
+
+      shared:
+        description: "Build Granite as shared library"
+        required: true
+        type: choice
+        default: OFF
         options:
           - OFF
           - ON
@@ -20,13 +29,13 @@ on:
 
 jobs:
   build:
-    name: "Linux | SDL | SHARED=${{ inputs.shared || 'OFF' }}"
+    name: "Linux | ${{ inputs.platform || 'SDL' }} | SHARED=${{ inputs.shared || 'OFF' }}"
 
     runs-on: ubuntu-latest
 
     env:
       BUILD_TYPE: Release
-      GRANITE_PLATFORM: SDL
+      GRANITE_PLATFORM: ${{ inputs.platform || 'SDL' }}
       GRANITE_SHARED: ${{ inputs.shared || 'OFF' }}
 
     steps:
@@ -67,7 +76,21 @@ jobs:
             vulkan-tools
 
       # ------------------------------------------------------------
-      # Configure Granite
+      # Build configuration
+      # ------------------------------------------------------------
+
+      - name: Show configuration
+        run: |
+          echo "=========================================="
+          echo "Granite Build"
+          echo "=========================================="
+          echo "Platform : $GRANITE_PLATFORM"
+          echo "Shared   : $GRANITE_SHARED"
+          echo "Build    : $BUILD_TYPE"
+          echo "=========================================="
+
+      # ------------------------------------------------------------
+      # Configure
       # ------------------------------------------------------------
 
       - name: Configure Granite
@@ -82,7 +105,7 @@ jobs:
             -DGRANITE_INSTALL_EXE_TARGETS=ON
 
       # ------------------------------------------------------------
-      # Build Granite
+      # Build
       # ------------------------------------------------------------
 
       - name: Build Granite
@@ -92,7 +115,7 @@ jobs:
             --parallel 2
 
       # ------------------------------------------------------------
-      # Install Granite
+      # Install
       # ------------------------------------------------------------
 
       - name: Install Granite
@@ -100,27 +123,13 @@ jobs:
           cmake --install build
 
       # ------------------------------------------------------------
-      # Show build information
-      # ------------------------------------------------------------
-
-      - name: Show build configuration
-        run: |
-          echo "=========================================="
-          echo "Granite build configuration"
-          echo "=========================================="
-          echo "Platform : $GRANITE_PLATFORM"
-          echo "Shared   : $GRANITE_SHARED"
-          echo "Build    : $BUILD_TYPE"
-          echo "=========================================="
-
-      # ------------------------------------------------------------
-      # Show installed files
+      # Show output
       # ------------------------------------------------------------
 
       - name: Show installed files
         run: |
           echo "=========================================="
-          echo "Granite install tree"
+          echo "Installed files"
           echo "=========================================="
 
           find "$GITHUB_WORKSPACE/install" \
@@ -138,7 +147,7 @@ jobs:
           ./linkage-test
 
       # ------------------------------------------------------------
-      # External test
+      # External build
       # ------------------------------------------------------------
 
       - name: Configure external test
@@ -159,6 +168,10 @@ jobs:
       - name: Install external test
         run: |
           cmake --install build-self
+
+      # ------------------------------------------------------------
+      # External linkage test
+      # ------------------------------------------------------------
 
       - name: Test external linkage
         if: hashFiles('self-install/bin/link-test') != ''
@@ -181,7 +194,7 @@ jobs:
             "package/$PACKAGE/"
 
           echo "=========================================="
-          echo "Package contents"
+          echo "Package"
           echo "=========================================="
 
           find "package/$PACKAGE" \
@@ -193,15 +206,15 @@ jobs:
             "$PACKAGE"
 
       # ------------------------------------------------------------
-      # Upload package
+      # Upload library
       # ------------------------------------------------------------
 
       - name: Upload Granite package
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-SDL-shared-${{ env.GRANITE_SHARED }}
+          name: granite-linux-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}
           path: |
-            granite-linux-SDL-shared-${{ env.GRANITE_SHARED }}.tar.gz
+            granite-linux-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -212,7 +225,7 @@ jobs:
       - name: Upload install tree
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-SDL-install-${{ env.GRANITE_SHARED }}
+          name: granite-linux-${{ env.GRANITE_PLATFORM }}-install-${{ env.GRANITE_SHARED }}
           path: install/
           if-no-files-found: error
           retention-days: 30
