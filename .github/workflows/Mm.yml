@@ -16,7 +16,7 @@ on:
         description: "Build Granite as shared library"
         required: true
         type: choice
-        default: true
+        default: ON
         options:
           - OFF
           - ON
