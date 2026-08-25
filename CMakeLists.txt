@@ -2,6 +2,28 @@ cmake_minimum_required(VERSION 3.6)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
 project(Granite LANGUAGES CXX C)
+# Output directory for built libraries and executables.
+set(GRANITE_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build")
+
+file(MAKE_DIRECTORY "${GRANITE_OUTPUT_DIR}")
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${GRANITE_OUTPUT_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${GRANITE_OUTPUT_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${GRANITE_OUTPUT_DIR}")
+
+# Multi-config generators (Visual Studio, etc.)
+foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER "${CONFIG}" CONFIG_UPPER)
+
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER}
+        "${GRANITE_OUTPUT_DIR}")
+
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER}
+        "${GRANITE_OUTPUT_DIR}")
+
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER}
+        "${GRANITE_OUTPUT_DIR}")
+endforeach()
 
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
     set(GRANITE_CXX_FLAGS -Wshadow -Wall -Wextra -Wno-comment -Wno-missing-field-initializers -Wno-empty-body)
