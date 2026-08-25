@@ -29,37 +29,38 @@ on:
 
 jobs:
   build:
-    name: "Linux | ${{ inputs.platform || 'SDL' }} | SHARED=${{ inputs.shared || 'OFF' }}"
+    name: "Linux ARM64 | ${{ inputs.platform || 'SDL' }} | SHARED=${{ inputs.shared || 'ON' }}"
 
     runs-on: ubuntu-24.04-arm
 
     env:
       BUILD_TYPE: Release
       GRANITE_PLATFORM: ${{ inputs.platform || 'SDL' }}
-      GRANITE_SHARED: ${{ inputs.shared || 'OFF' }}
+      GRANITE_SHARED: ${{ inputs.shared || 'ON' }}
 
     steps:
-      # ------------------------------------------------------------
+
+      # ============================================================
       # Checkout
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ------------------------------------------------------------
+      # ============================================================
       # Python
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      # ------------------------------------------------------------
+      # ============================================================
       # Linux dependencies
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Install dependencies
         run: |
@@ -75,27 +76,32 @@ jobs:
             libvulkan-dev \
             vulkan-tools
 
-      # ------------------------------------------------------------
-      # Build configuration
-      # ------------------------------------------------------------
+      # ============================================================
+      # Configuration
+      # ============================================================
 
       - name: Show configuration
         run: |
           echo "=========================================="
-          echo "Granite Build"
+          echo "Granite Linux ARM64 Build"
           echo "=========================================="
-          echo "Platform : $GRANITE_PLATFORM"
-          echo "Shared   : $GRANITE_SHARED"
-          echo "Build    : $BUILD_TYPE"
+          echo "Architecture : $(uname -m)"
+          echo "Platform     : $GRANITE_PLATFORM"
+          echo "Shared       : $GRANITE_SHARED"
+          echo "Build type   : $BUILD_TYPE"
           echo "=========================================="
 
-      # ------------------------------------------------------------
+      # ============================================================
       # Configure
-      # ------------------------------------------------------------
+      #
+      # cmake-build = CMake internal build tree
+      # build       = actual Granite output directory
+      # ============================================================
 
       - name: Configure Granite
         run: |
-          cmake -S . -B build \
+          cmake -S . -B cmake-build \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
             -DGRANITE_SHARED="$GRANITE_SHARED" \
@@ -104,26 +110,65 @@ jobs:
             -DGRANITE_INSTALL_TARGETS=ON \
             -DGRANITE_INSTALL_EXE_TARGETS=ON
 
-      # ------------------------------------------------------------
+      # ============================================================
       # Build
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Build Granite
         run: |
-          cmake --build build \
-            --config "$BUILD_TYPE" \
+          cmake --build cmake-build \
             --parallel 2
 
-      
-      
+      # ============================================================
+      # Show build output
+      # ============================================================
 
-      # ------------------------------------------------------------
+      - name: Show build output
+        run: |
+          echo "=========================================="
+          echo "Granite build output"
+          echo "=========================================="
+
+          find "$GITHUB_WORKSPACE/build" \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -name '*.a' \
+              -o -name '*.so' \
+              -o -name '*.so.*' \
+              -o -name '*.out' \
+            \) \
+            -print | sort
+
+      # ============================================================
+      # Install
+      # ============================================================
+
+      - name: Install Granite
+        run: |
+          cmake --install cmake-build
+
+      # ============================================================
+      # Show installed output
+      # ============================================================
+
+      - name: Show installed files
+        run: |
+          echo "=========================================="
+          echo "Installed Granite"
+          echo "=========================================="
+
+          find "$GITHUB_WORKSPACE/install" \
+            -type f \
+            -print | sort
+
+      # ============================================================
       # Package
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Package Granite
         run: |
-          PACKAGE="granite-linux-${GRANITE_PLATFORM}-shared-${GRANITE_SHARED}"
+          PACKAGE="granite-linux-arm64-${GRANITE_PLATFORM}-shared-${GRANITE_SHARED}"
 
           mkdir -p "package/$PACKAGE"
 
@@ -132,38 +177,54 @@ jobs:
             "package/$PACKAGE/"
 
           echo "=========================================="
-          echo "Package"
+          echo "Package contents"
           echo "=========================================="
 
           find "package/$PACKAGE" \
             -type f \
             -print | sort
 
-          tar -C package \
+          tar \
+            -C package \
             -czf "${PACKAGE}.tar.gz" \
             "$PACKAGE"
 
-      # ------------------------------------------------------------
-      # Upload library
-      # ------------------------------------------------------------
+      # ============================================================
+      # Upload build output
+      # ============================================================
+
+      - name: Upload Granite build
+        uses: actions/upload-artifact@v4
+        with:
+          name: granite-linux-arm64-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}
+          path: |
+            build/*.a
+            build/*.so
+            build/*.so.*
+          if-no-files-found: error
+          retention-days: 30
+
+      # ============================================================
+      # Upload complete package
+      # ============================================================
 
       - name: Upload Granite package
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}
+          name: granite-linux-arm64-${{ env.GRANITE_PLATFORM }}-package-${{ env.GRANITE_SHARED }}
           path: |
-            granite-linux-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}.tar.gz
+            granite-linux-arm64-${{ env.GRANITE_PLATFORM }}-shared-${{ env.GRANITE_SHARED }}.tar.gz
           if-no-files-found: error
           retention-days: 30
 
-      # ------------------------------------------------------------
-      # Upload raw install tree
-      # ------------------------------------------------------------
+      # ============================================================
+      # Upload install tree
+      # ============================================================
 
       - name: Upload install tree
         uses: actions/upload-artifact@v4
         with:
-          name: granite-linux-${{ env.GRANITE_PLATFORM }}-install-${{ env.GRANITE_SHARED }}
+          name: granite-linux-arm64-${{ env.GRANITE_PLATFORM }}-install-${{ env.GRANITE_SHARED }}
           path: install/
           if-no-files-found: error
           retention-days: 30
